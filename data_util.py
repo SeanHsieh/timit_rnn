@@ -1,10 +1,12 @@
 import glob
 import os
 import random
+import sys
 
 import essentia
 from essentia.standard import MonoLoader, FrameGenerator, Resample, Windowing, Spectrum, MFCC, MonoWriter
 import numpy as np
+from tqdm import tqdm
 
 def mfcc_init(nfft=1024, nbands=40, ncoeffs=13, fs=44100.0):
   window = Windowing(size=nfft, type='blackmanharris62')
@@ -25,7 +27,7 @@ def load_timit(timit_dir,
   limit = limit if limit else len(wrd_fps)
   resampler = Resample(inputSampleRate=16000, outputSampleRate=22000, quality=0)
   results = []
-  for wrd_fp in wrd_fps[:limit]:
+  for wrd_fp in tqdm(wrd_fps[:limit]):
     wav_fp = '{}.WAV'.format(os.path.splitext(wrd_fp)[0])
     path_data = wrd_fp.split(os.sep)[-3:]
     dialect = path_data[0]
@@ -49,18 +51,24 @@ def load_timit(timit_dir,
   return results
 
 if __name__ == '__main__':
-  timit_train = '/media/cdonahue/bulk1/datasets/timit/TIMIT/TRAIN'
-  timit_test = '/media/cdonahue/bulk1/datasets/timit/TIMIT/TEST'
+  if 'test' in sys.argv:
+    timit_dir = '/media/cdonahue/bulk1/datasets/timit/TIMIT/TEST'
+    out_name = 'test'
+  else:
+    timit_dir = '/media/cdonahue/bulk1/datasets/timit/TIMIT/TRAIN'
+    out_name = 'train'
+
   nfft = 512
   nhop = 256
   nbands = 40
   ncoeffs = 13
   mfcc_extractor = mfcc_init(nfft=nfft, nbands=nbands, ncoeffs=ncoeffs, fs=22000.0)
-  timit_feats = load_timit(timit_train,
+  timit_feats = load_timit(timit_dir,
                            nfft=nfft,
                            nhop=nhop,
-                           limit=16,
+                           limit=None,
                            extractor=mfcc_extractor)
+
   import cPickle as pickle
-  with open('timit_tiny_utter_mfcc_13.pkl', 'wb') as f:
+  with open('timit_{}_utter_mfcc_13.pkl'.format(out_name), 'wb') as f:
     pickle.dump(timit_feats, f)

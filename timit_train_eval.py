@@ -36,18 +36,19 @@ def train():
   max_seq_len = np.max(seq_lens)
   labels = label_counts.keys()
   num_classes = len(labels)
-  print 'num utterances {}\nlabel counts {}\nfeat dim {}\nseq len min/max/mean/std {}/{}/{:.2f}/{:.2f}'.format(sum(label_counts.values()), label_counts, feat_dim, np.min(seq_lens), np.max(seq_lens), np.mean(seq_lens), np.std(seq_lens))
+  print 'num utterances {}\nlabel counts (n={}), {}\nfeat dim {}\nseq len min/max/mean/std {}/{}/{:.2f}/{:.2f}'.format(sum(label_counts.values()), num_classes, label_counts, feat_dim, np.min(seq_lens), np.max(seq_lens), np.mean(seq_lens), np.std(seq_lens))
   label_to_id = {label : i for i, label in enumerate(labels)}
 
   with tf.Session() as sess:
     input_seq = tf.placeholder(dtype, shape=[None, max_seq_len, feat_dim], name="input_seq")
+    input_seq_len = tf.placeholder(tf.int32, shape=[None], name="input_seq_len")
     label = tf.placeholder(tf.int32, [None], name="target")
-    target = tf.one_hot(label, depth=num_classes)
+    target = tf.one_hot(label, depth=num_classes, dtype=dtype)
 
     cell = tf.nn.rnn_cell.BasicLSTMCell(FLAGS.size)
     if FLAGS.num_layers > 1:
       cell = tf.nn.rnn_cell.MultiRNNCell([cell] * FLAGS.num_layers)
-    output, _ = tf.nn.dynamic_rnn(cell, input_seq, dtype=dtype)
+    output, _ = tf.nn.dynamic_rnn(cell, input_seq, sequence_length=input_seq_len, dtype=dtype)
     output_T = tf.transpose(output, [1, 0, 2])
     last = tf.gather(output_T, int(output_T.get_shape()[0]) - 1)
     
@@ -57,7 +58,7 @@ def train():
     prediction = tf.nn.softmax(logits)
     cross_entropy = -tf.reduce_sum(target * tf.log(prediction))
 
-    opt = tf.train.GradientDescentOptimizer(FLAGS.learning_rate)
+    opt = tf.train.RMSPropOptimizer(FLAGS.learning_rate)
     updates = opt.minimize(cross_entropy)
 
     tf.scalar_summary("cross_entropy", cross_entropy)
@@ -71,6 +72,7 @@ def train():
     for epoch in xrange(FLAGS.num_epochs):
       for _ in xrange(len(seqs) // FLAGS.batch_size):
         batch_x = []
+        batch_x_len = []
         batch_y = []
         for _ in xrange(FLAGS.batch_size):
           seq, target = random.choice(seqs)
@@ -81,11 +83,14 @@ def train():
           seq = seq + padding
 
           batch_x.append(seq)
+          batch_x_len.append(seq_len)
           batch_y.append(target_id)
+
         batch_x = np.array(batch_x)
+        batch_x_len = np.array(batch_x_len)
         batch_y = np.array(batch_y)
 
-        summary, loss, _ = sess.run([merged, cross_entropy, updates], {input_seq: batch_x, label: batch_y})
+        summary, loss, _ = sess.run([merged, cross_entropy, updates], {input_seq: batch_x, input_seq_len: batch_x_len, label: batch_y})
         summary_writer.add_summary(summary, step)
         step += 1
 
