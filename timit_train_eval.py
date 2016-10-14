@@ -49,8 +49,11 @@ def train():
   max_seq_len = np.max(seq_lens)
   labels = train_label_counts.keys()
   num_classes = len(labels)
-  print 'num utterances {}\nlabel counts (n={}), {}\nfeat dim {}\nseq len min/max/mean/std {}/{}/{:.2f}/{:.2f}'.format(sum(train_label_counts.values()), num_classes, train_label_counts, feat_dim, np.min(seq_lens), np.max(seq_lens), np.mean(seq_lens), np.std(seq_lens))
+  print 'Train data: num utterances {}\nlabel counts (n={}), {}\nfeat dim {}\nseq len min/max/mean/std {}/{}/{:.2f}/{:.2f}'.format(len(train_data), num_classes, train_label_counts, feat_dim, np.min(seq_lens), np.max(seq_lens), np.mean(seq_lens), np.std(seq_lens))
   label_to_id = {label : i for i, label in enumerate(labels)}
+
+  if eval_data:
+    print 'Eval data: num utterances {}\nlabel_counts (n={}), {}'.format(len(eval_data), num_classes, eval_label_counts)
 
   with tf.Session() as sess:
     # Input
