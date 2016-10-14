@@ -122,7 +122,6 @@ def train():
         # Run training
         batch_train_summary, batch_loss, _ = sess.run([train_summary, cross_entropy, updates], {input_seq: batch_x, input_seq_len: batch_x_len, label: batch_y})
         summary_writer.add_summary(batch_train_summary, batches)
-        batches += 1
 
         # Run evaluation
         if batches % FLAGS.batches_per_ckpt == 0:
@@ -153,6 +152,8 @@ def train():
               accuracy_cumulative += batch_accuracy
             eval_summary_result = sess.run(eval_summary, feed_dict={eval_accuracy: accuracy_cumulative / num_batches})
             summary_writer.add_summary(eval_summary_result, batches)
+
+        batches += 1
 
 def main(_):
   train()
