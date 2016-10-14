@@ -13,38 +13,52 @@ tf.app.flags.DEFINE_integer("size", 100, "")
 tf.app.flags.DEFINE_integer("num_layers", 1, "")
 tf.app.flags.DEFINE_integer("batches_per_ckpt", 256, "")
 tf.app.flags.DEFINE_string("train_pkl_fp", "", "")
+tf.app.flags.DEFINE_string("eval_pkl_fp", "", "")
 tf.app.flags.DEFINE_string("train_dir", "", "")
 
 FLAGS = tf.app.flags.FLAGS
 dtype = tf.float32
 
-def train():
-  with open(FLAGS.train_pkl_fp, 'rb') as f:
-    train_data = pickle.load(f)
+def load_timit_data(pkl_fp):
+  with open(pkl_fp, 'rb') as f:
+    data = pickle.load(f)
+
   seqs = []
+  seq_lens = []
   label_counts = {}
-  for metadata, seq in train_data:
-    sex, speaker_id = metadata
+  for metadata, seq in data:
+    dialect, sex, speaker_id, sentence_id = metadata
     label = sex
     if label not in label_counts:
       label_counts[label] = 0
     label_counts[label] += 1
     seqs.append((seq, label))
+  
+  return seqs, label_counts
 
-  feat_dim = len(seqs[0][0][0])
-  seq_lens = np.array([len(seq[0]) for seq in seqs])
+def train():
+  # Load data
+  train_data, train_label_counts = load_timit_data(FLAGS.train_pkl_fp)
+  eval_data, eval_label_counts = None, {}
+  if FLAGS.eval_pkl_fp:
+    eval_data, eval_label_counts = load_timit_data(FLAGS.eval_pkl_fp)
+
+  # Process data
+  feat_dim = len(train_data[0][0][0])
+  seq_lens = np.array([len(x[0]) for x in train_data])
   max_seq_len = np.max(seq_lens)
-  labels = label_counts.keys()
+  labels = train_label_counts.keys()
   num_classes = len(labels)
-  print 'num utterances {}\nlabel counts (n={}), {}\nfeat dim {}\nseq len min/max/mean/std {}/{}/{:.2f}/{:.2f}'.format(sum(label_counts.values()), num_classes, label_counts, feat_dim, np.min(seq_lens), np.max(seq_lens), np.mean(seq_lens), np.std(seq_lens))
+  print 'num utterances {}\nlabel counts (n={}), {}\nfeat dim {}\nseq len min/max/mean/std {}/{}/{:.2f}/{:.2f}'.format(sum(train_label_counts.values()), num_classes, train_label_counts, feat_dim, np.min(seq_lens), np.max(seq_lens), np.mean(seq_lens), np.std(seq_lens))
   label_to_id = {label : i for i, label in enumerate(labels)}
 
   with tf.Session() as sess:
+    # Input
     input_seq = tf.placeholder(dtype, shape=[None, max_seq_len, feat_dim], name="input_seq")
     input_seq_len = tf.placeholder(tf.int32, shape=[None], name="input_seq_len")
     label = tf.placeholder(tf.int32, [None], name="target")
-    target = tf.one_hot(label, depth=num_classes, dtype=dtype)
 
+    # RNN
     cell = tf.nn.rnn_cell.BasicLSTMCell(FLAGS.size)
     if FLAGS.num_layers > 1:
       cell = tf.nn.rnn_cell.MultiRNNCell([cell] * FLAGS.num_layers)
@@ -52,30 +66,43 @@ def train():
     output_T = tf.transpose(output, [1, 0, 2])
     last = tf.gather(output_T, int(output_T.get_shape()[0]) - 1)
     
+    # Regression
     softmax_w = tf.get_variable("softmax_w", [FLAGS.size, num_classes], dtype=dtype)
     softmax_b = tf.get_variable("softmax_b", [num_classes], dtype=dtype)
     logits = tf.matmul(last, softmax_w) + softmax_b
     prediction = tf.nn.softmax(logits)
+    target = tf.one_hot(label, depth=num_classes, dtype=dtype)
     cross_entropy = -tf.reduce_sum(target * tf.log(prediction))
+    cross_entropy_summary = tf.scalar_summary("cross_entropy", cross_entropy)
 
+    # Updates
     opt = tf.train.RMSPropOptimizer(FLAGS.learning_rate)
     updates = opt.minimize(cross_entropy)
 
-    tf.scalar_summary("cross_entropy", cross_entropy)
+    # Evaluate
+    correct_predictions = tf.equal(tf.cast(tf.argmax(prediction, 1), np.int32), label)
+    accuracy = tf.reduce_mean(tf.cast(correct_predictions, dtype))
 
+    # Extra summaries
+    eval_accuracy = tf.placeholder(tf.float32, shape=[], name="eval_accuracy")
+    eval_accuracy_summary = tf.scalar_summary("eval_accuracy", eval_accuracy)
+
+    # Initialize tensorflow
     sess.run(tf.initialize_all_variables())
-
-    merged = tf.merge_all_summaries()
+    train_summary = tf.merge_summary([cross_entropy_summary])
+    eval_summary = tf.merge_summary([eval_accuracy_summary])
     summary_writer = tf.train.SummaryWriter(FLAGS.train_dir, sess.graph)
 
-    step = 0
+    # Run training
+    batches = 0
     for epoch in xrange(FLAGS.num_epochs):
-      for _ in xrange(len(seqs) // FLAGS.batch_size):
+      for _ in xrange(len(train_data) // FLAGS.batch_size):
+        # Prepare training batch.
         batch_x = []
         batch_x_len = []
         batch_y = []
         for _ in xrange(FLAGS.batch_size):
-          seq, target = random.choice(seqs)
+          seq, target = train_data[random.randint(0, len(train_data) - 1)]
           seq_len = len(seq)
           target_id = label_to_id[target]
 
@@ -85,14 +112,44 @@ def train():
           batch_x.append(seq)
           batch_x_len.append(seq_len)
           batch_y.append(target_id)
-
         batch_x = np.array(batch_x)
         batch_x_len = np.array(batch_x_len)
         batch_y = np.array(batch_y)
 
-        summary, loss, _ = sess.run([merged, cross_entropy, updates], {input_seq: batch_x, input_seq_len: batch_x_len, label: batch_y})
-        summary_writer.add_summary(summary, step)
-        step += 1
+        # Run training
+        batch_train_summary, batch_loss, _ = sess.run([train_summary, cross_entropy, updates], {input_seq: batch_x, input_seq_len: batch_x_len, label: batch_y})
+        summary_writer.add_summary(batch_train_summary, batches)
+        batches += 1
+
+        # Run evaluation
+        if batches % FLAGS.batches_per_ckpt == 0:
+          if eval_data:
+            num_batches = len(eval_data) // FLAGS.batch_size
+            accuracy_cumulative = 0.0
+            for i in xrange(num_batches):
+              batch_x = []
+              batch_x_len = []
+              batch_y = []
+              for j in xrange(FLAGS.batch_size):
+                seq, target = eval_data[i * FLAGS.batch_size + j]
+                seq_len = len(seq)
+                target_id = label_to_id[target]
+
+                padding = [np.zeros_like(seq[0])] * (max_seq_len - seq_len)
+                seq = seq + padding
+
+                batch_x.append(seq)
+                batch_x_len.append(seq_len)
+                batch_y.append(target_id)
+              batch_x = np.array(batch_x)
+              batch_x_len = np.array(batch_x_len)
+              batch_y = np.array(batch_y)
+
+              # Run evaluation
+              batch_accuracy = sess.run(accuracy, {input_seq: batch_x, input_seq_len: batch_x_len, label: batch_y})
+              accuracy_cumulative += batch_accuracy
+            eval_summary_result = sess.run(eval_summary, feed_dict={eval_accuracy: accuracy_cumulative / num_batches})
+            summary_writer.add_summary(eval_summary_result, batches)
 
 def main(_):
   train()
