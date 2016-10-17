@@ -6,6 +6,7 @@ import time
 import numpy as np
 import tensorflow as tf
 
+tf.app.flags.DEFINE_bool("balance_train_set", False, "")
 tf.app.flags.DEFINE_float("learning_rate", 0.3, "")
 tf.app.flags.DEFINE_integer("batch_size", 4, "")
 tf.app.flags.DEFINE_integer("num_epochs", 10, "")
@@ -36,6 +37,30 @@ def load_timit_data(pkl_fp):
   
   return seqs, label_counts
 
+def prepare_batch(data, label_to_id, max_seq_len, start_from=None):
+  batch_x = []
+  batch_x_len = []
+  batch_y = []
+
+  for _ in xrange(FLAGS.batch_size):
+    if start_from == None:
+      idx = random.randint(0, len(data) - 1)
+    else:
+      idx = start_from
+      start_from += 1
+    seq, target = data[idx]
+    seq_len = len(seq)
+    target_id = label_to_id[target]
+
+    padding = [np.zeros_like(seq[0])] * (max_seq_len - seq_len)
+    seq = seq + padding
+
+    batch_x.append(seq)
+    batch_x_len.append(seq_len)
+    batch_y.append(target_id)
+
+  return np.array(batch_x), np.array(batch_x_len), np.array(batch_y)
+
 def train():
   # Load data
   train_data, train_label_counts = load_timit_data(FLAGS.train_pkl_fp)
@@ -49,8 +74,18 @@ def train():
   max_seq_len = np.max(seq_lens)
   labels = train_label_counts.keys()
   num_classes = len(labels)
-  print 'Train data: num utterances {}\nlabel counts (n={}), {}\nfeat dim {}\nseq len min/max/mean/std {}/{}/{:.2f}/{:.2f}'.format(len(train_data), num_classes, train_label_counts, feat_dim, np.min(seq_lens), np.max(seq_lens), np.mean(seq_lens), np.std(seq_lens))
+  num_labels_min = min(train_label_counts.values())
+  print 'Train data: num utterances {}\nlabel counts (n={}), {}\nfeat dim {}\nseq len min/max/mean/std {}/{}/{:.2f}/{:.2f}'.format(len(train_data), num_classes, train_label_counts, feat_dim, np.min(seq_lens), max_seq_len, np.mean(seq_lens), np.std(seq_lens))
   label_to_id = {label : i for i, label in enumerate(labels)}
+
+  # Balance data
+  if FLAGS.balance_train_set:
+    train_data_balanced = []
+    for label in labels:
+      train_data_for_label = filter(lambda x: x[1] == label, train_data)
+      train_data_balanced += random.sample(train_data_for_label, num_labels_min)
+    train_data = train_data_balanced
+    print 'Balanced train data: num utterances {}'.format(len(train_data))
 
   if eval_data:
     print 'Eval data: num utterances {}\nlabel_counts (n={}), {}'.format(len(eval_data), num_classes, eval_label_counts)
@@ -100,24 +135,7 @@ def train():
     batches = 0
     for epoch in xrange(FLAGS.num_epochs):
       for _ in xrange(len(train_data) // FLAGS.batch_size):
-        # Prepare training batch.
-        batch_x = []
-        batch_x_len = []
-        batch_y = []
-        for _ in xrange(FLAGS.batch_size):
-          seq, target = train_data[random.randint(0, len(train_data) - 1)]
-          seq_len = len(seq)
-          target_id = label_to_id[target]
-
-          padding = [np.zeros_like(seq[0])] * (max_seq_len - seq_len)
-          seq = seq + padding
-
-          batch_x.append(seq)
-          batch_x_len.append(seq_len)
-          batch_y.append(target_id)
-        batch_x = np.array(batch_x)
-        batch_x_len = np.array(batch_x_len)
-        batch_y = np.array(batch_y)
+        batch_x, batch_x_len, batch_y = prepare_batch(train_data, label_to_id, max_seq_len)
 
         # Run training
         batch_train_summary, batch_loss, _ = sess.run([train_summary, cross_entropy, updates], {input_seq: batch_x, input_seq_len: batch_x_len, label: batch_y})
@@ -129,23 +147,7 @@ def train():
             num_batches = len(eval_data) // FLAGS.batch_size
             accuracy_cumulative = 0.0
             for i in xrange(num_batches):
-              batch_x = []
-              batch_x_len = []
-              batch_y = []
-              for j in xrange(FLAGS.batch_size):
-                seq, target = eval_data[i * FLAGS.batch_size + j]
-                seq_len = len(seq)
-                target_id = label_to_id[target]
-
-                padding = [np.zeros_like(seq[0])] * (max_seq_len - seq_len)
-                seq = seq + padding
-
-                batch_x.append(seq)
-                batch_x_len.append(seq_len)
-                batch_y.append(target_id)
-              batch_x = np.array(batch_x)
-              batch_x_len = np.array(batch_x_len)
-              batch_y = np.array(batch_y)
+              batch_x, batch_x_len, batch_y = prepare_batch(eval_data, label_to_id, max_seq_len, start_from=i * FLAGS.batch_size)
 
               # Run evaluation
               batch_accuracy = sess.run(accuracy, {input_seq: batch_x, input_seq_len: batch_x_len, label: batch_y})
