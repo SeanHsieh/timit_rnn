@@ -110,7 +110,8 @@ def train():
     logits = tf.matmul(last, softmax_w) + softmax_b
     prediction = tf.nn.softmax(logits)
     target = tf.one_hot(label, depth=num_classes, dtype=dtype)
-    cross_entropy = -tf.reduce_sum(target * tf.log(prediction))
+    # https://www.tensorflow.org/versions/r0.9/tutorials/mnist/pros/index.html
+    cross_entropy = tf.reduce_mean(-tf.reduce_sum(target * tf.log(prediction), reduction_indices=[1]))
     cross_entropy_summary = tf.scalar_summary("cross_entropy", cross_entropy)
 
     # Updates
