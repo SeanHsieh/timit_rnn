@@ -93,8 +93,9 @@ def train():
   with tf.Session() as sess:
     # Input
     input_seq = tf.placeholder(dtype, shape=[None, max_seq_len, feat_dim], name="input_seq")
-    input_seq_len = tf.placeholder(tf.int32, shape=[None], name="input_seq_len")
-    label = tf.placeholder(tf.int32, [None], name="target")
+    input_seq_len = tf.placeholder(tf.int64, shape=[None], name="input_seq_len")
+    label = tf.placeholder(tf.int64, [None], name="target")
+    target = tf.one_hot(label, depth=num_classes, dtype=dtype)
 
     # RNN
     cell = tf.nn.rnn_cell.BasicLSTMCell(FLAGS.size)
@@ -108,56 +109,61 @@ def train():
     softmax_w = tf.get_variable("softmax_w", [FLAGS.size, num_classes], dtype=dtype)
     softmax_b = tf.get_variable("softmax_b", [num_classes], dtype=dtype)
     logits = tf.matmul(last, softmax_w) + softmax_b
-    prediction = tf.nn.softmax(logits)
-    target = tf.one_hot(label, depth=num_classes, dtype=dtype)
+    posterior = tf.nn.softmax(logits)
+    #posterior = tf.Print(posterior, [posterior], summarize=32)
     # https://www.tensorflow.org/versions/r0.9/tutorials/mnist/pros/index.html
-    cross_entropy = tf.reduce_mean(-tf.reduce_sum(target * tf.log(prediction), reduction_indices=[1]))
-    cross_entropy_summary = tf.scalar_summary("cross_entropy", cross_entropy)
+    cross_entropy = tf.reduce_mean(-tf.reduce_sum(target * tf.log(posterior), reduction_indices=[1]))
+    cross_entropy_summary = tf.scalar_summary("train_cross_entropy_batch", cross_entropy)
 
     # Updates
     opt = tf.train.RMSPropOptimizer(FLAGS.learning_rate)
     updates = opt.minimize(cross_entropy)
 
     # Evaluate
-    #TODO I think this line is wrong now
-    correct_predictions = tf.equal(tf.cast(tf.argmax(prediction, 1), np.int32), label)
-    accuracy = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
+    model_prediction = tf.argmax(posterior, 1)
+    correct_prediction = tf.equal(model_prediction, label)
+    model_accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+    model_accuracy_summary = tf.scalar_summary("train_accuracy_batch", model_accuracy)
 
-    # Extra summaries
+    # Per-checkpoint summaries (not per batch)
+    train_accuracy = tf.placeholder(tf.float32, shape=[], name="train_accuracy")
+    train_accuracy_summary = tf.scalar_summary("train_accuracy_ckpt", train_accuracy)
     eval_accuracy = tf.placeholder(tf.float32, shape=[], name="eval_accuracy")
-    eval_accuracy_summary = tf.scalar_summary("eval_accuracy", eval_accuracy)
+    eval_accuracy_summary = tf.scalar_summary("eval_accuracy_ckpt", eval_accuracy)
 
     # Initialize tensorflow
     sess.run(tf.initialize_all_variables())
-    train_summary = tf.merge_summary([cross_entropy_summary])
-    eval_summary = tf.merge_summary([eval_accuracy_summary])
+    train_summary = tf.merge_summary([cross_entropy_summary, model_accuracy_summary])
     summary_writer = tf.train.SummaryWriter(FLAGS.train_dir, sess.graph)
 
     # Run training
-    batches = 0
-    for epoch in xrange(FLAGS.num_epochs):
-      for _ in xrange(len(train_data) // FLAGS.batch_size):
-        batch_x, batch_x_len, batch_y = prepare_batch(train_data, label_to_id, max_seq_len)
+    batches_per_epoch = len(train_data) // FLAGS.batch_size
+    batch = 0
+    train_accuracy_cumulative = 0.0
+    for _ in xrange(FLAGS.num_epochs * batches_per_epoch):
+      # Run training
+      batch_x, batch_x_len, batch_y = prepare_batch(train_data, label_to_id, max_seq_len)
+      train_summary_batch, train_accuracy_batch, _ = sess.run([train_summary, model_accuracy, updates], {input_seq: batch_x, input_seq_len: batch_x_len, label: batch_y})
+      summary_writer.add_summary(train_summary_batch, batch)
 
-        # Run training
-        batch_train_summary, batch_loss, _ = sess.run([train_summary, cross_entropy, updates], {input_seq: batch_x, input_seq_len: batch_x_len, label: batch_y})
-        summary_writer.add_summary(batch_train_summary, batches)
+      train_accuracy_cumulative += train_accuracy_batch
 
-        # Run evaluation
-        if batches % FLAGS.batches_per_ckpt == 0:
-          if eval_data:
-            num_batches = len(eval_data) // FLAGS.batch_size
-            accuracy_cumulative = 0.0
-            for i in xrange(num_batches):
-              batch_x, batch_x_len, batch_y = prepare_batch(eval_data, label_to_id, max_seq_len, start_from=i * FLAGS.batch_size)
+      batch += 1
 
-              # Run evaluation
-              batch_accuracy = sess.run(accuracy, {input_seq: batch_x, input_seq_len: batch_x_len, label: batch_y})
-              accuracy_cumulative += batch_accuracy
-            eval_summary_result = sess.run(eval_summary, feed_dict={eval_accuracy: accuracy_cumulative / num_batches})
-            summary_writer.add_summary(eval_summary_result, batches)
-
-        batches += 1
+      # Run evaluation
+      if batch % FLAGS.batches_per_ckpt == 0:
+        train_accuracy_summary_result = sess.run(train_accuracy_summary, feed_dict={train_accuracy: train_accuracy_cumulative / FLAGS.batches_per_ckpt})
+        summary_writer.add_summary(train_accuracy_summary_result, batch)
+        if eval_data:
+          num_eval_batches = len(eval_data) // FLAGS.batch_size
+          eval_accuracy_cumulative = 0.0
+          for i in xrange(num_eval_batches):
+            # Run evaluation
+            batch_x, batch_x_len, batch_y = prepare_batch(eval_data, label_to_id, max_seq_len, start_from=i * FLAGS.batch_size)
+            eval_accuracy_batch = sess.run(model_accuracy, {input_seq: batch_x, input_seq_len: batch_x_len, label: batch_y})
+            eval_accuracy_cumulative += eval_accuracy_batch
+          eval_accuracy_summary_result = sess.run(eval_accuracy_summary, feed_dict={eval_accuracy: eval_accuracy_cumulative / num_batches})
+          summary_writer.add_summary(eval_accuracy_summary_result, batch)
 
 def main(_):
   train()
