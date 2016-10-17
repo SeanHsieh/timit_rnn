@@ -162,7 +162,7 @@ def train():
             batch_x, batch_x_len, batch_y = prepare_batch(eval_data, label_to_id, max_seq_len, start_from=i * FLAGS.batch_size)
             eval_accuracy_batch = sess.run(model_accuracy, {input_seq: batch_x, input_seq_len: batch_x_len, label: batch_y})
             eval_accuracy_cumulative += eval_accuracy_batch
-          eval_accuracy_summary_result = sess.run(eval_accuracy_summary, feed_dict={eval_accuracy: eval_accuracy_cumulative / num_batches})
+          eval_accuracy_summary_result = sess.run(eval_accuracy_summary, feed_dict={eval_accuracy: eval_accuracy_cumulative / num_eval_batches})
           summary_writer.add_summary(eval_accuracy_summary_result, batch)
 
 def main(_):
