@@ -119,8 +119,9 @@ def train():
     updates = opt.minimize(cross_entropy)
 
     # Evaluate
+    #TODO I think this line is wrong now
     correct_predictions = tf.equal(tf.cast(tf.argmax(prediction, 1), np.int32), label)
-    accuracy = tf.reduce_mean(tf.cast(correct_predictions, dtype))
+    accuracy = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
 
     # Extra summaries
     eval_accuracy = tf.placeholder(tf.float32, shape=[], name="eval_accuracy")
