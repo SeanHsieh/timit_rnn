@@ -144,16 +144,19 @@ def train():
       # Run training
       batch_x, batch_x_len, batch_y = prepare_batch(train_data, label_to_id, max_seq_len)
       train_summary_batch, train_accuracy_batch, _ = sess.run([train_summary, model_accuracy, updates], {input_seq: batch_x, input_seq_len: batch_x_len, label: batch_y})
+
       summary_writer.add_summary(train_summary_batch, batch)
-
       train_accuracy_cumulative += train_accuracy_batch
-
       batch += 1
 
       # Run evaluation
       if batch % FLAGS.batches_per_ckpt == 0:
+        # Train accuracy summary
         train_accuracy_summary_result = sess.run(train_accuracy_summary, feed_dict={train_accuracy: train_accuracy_cumulative / FLAGS.batches_per_ckpt})
         summary_writer.add_summary(train_accuracy_summary_result, batch)
+        train_accuracy_cumulative = 0.0
+
+        # Eval accuracy summary (full pass through eval data)
         if eval_data:
           num_eval_batches = len(eval_data) // FLAGS.batch_size
           eval_accuracy_cumulative = 0.0
