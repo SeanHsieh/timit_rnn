@@ -6,6 +6,7 @@ import time
 import numpy as np
 import tensorflow as tf
 
+tf.app.flags.DEFINE_integer("task_id", 1, "Classify: 0=dialect, 1=sex, 2=speaker ID, 3=sentence ID")
 tf.app.flags.DEFINE_bool("balance_train_set", False, "")
 tf.app.flags.DEFINE_float("learning_rate", 0.3, "")
 tf.app.flags.DEFINE_integer("batch_size", 4, "")
@@ -20,7 +21,7 @@ tf.app.flags.DEFINE_string("train_dir", "", "")
 FLAGS = tf.app.flags.FLAGS
 dtype = tf.float32
 
-def load_timit_data(pkl_fp):
+def load_timit_data(pkl_fp, task_id=1):
   with open(pkl_fp, 'rb') as f:
     data = pickle.load(f)
 
@@ -28,8 +29,7 @@ def load_timit_data(pkl_fp):
   seq_lens = []
   label_counts = {}
   for metadata, seq in data:
-    dialect, sex, speaker_id, sentence_id = metadata
-    label = sex
+    label = metadata[task_id]
     if label not in label_counts:
       label_counts[label] = 0
     label_counts[label] += 1
@@ -63,10 +63,10 @@ def prepare_batch(data, label_to_id, max_seq_len, start_from=None):
 
 def train():
   # Load data
-  train_data, train_label_counts = load_timit_data(FLAGS.train_pkl_fp)
+  train_data, train_label_counts = load_timit_data(FLAGS.train_pkl_fp, FLAGS.task_id)
   eval_data, eval_label_counts = None, {}
   if FLAGS.eval_pkl_fp:
-    eval_data, eval_label_counts = load_timit_data(FLAGS.eval_pkl_fp)
+    eval_data, eval_label_counts = load_timit_data(FLAGS.eval_pkl_fp, FLAGS.task_id)
 
   # Process data
   feat_dim = len(train_data[0][0][0])
