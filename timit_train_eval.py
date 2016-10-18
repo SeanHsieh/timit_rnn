@@ -101,22 +101,20 @@ def train():
   cell = tf.nn.rnn_cell.BasicLSTMCell(FLAGS.size)
   if FLAGS.num_layers > 1:
     cell = tf.nn.rnn_cell.MultiRNNCell([cell] * FLAGS.num_layers)
-  output, _ = tf.nn.dynamic_rnn(cell, input_seq, sequence_length=input_seq_len, dtype=dtype)
-  output_T = tf.transpose(output, [1, 0, 2])
-  last = tf.gather(output_T, int(output_T.get_shape()[0]) - 1)
+  output, state = tf.nn.dynamic_rnn(cell, input_seq, sequence_length=input_seq_len, dtype=dtype)
+  state_final = state[-1].h
   
   # Regression
   softmax_w = tf.get_variable('softmax_w', [FLAGS.size, num_classes], dtype=dtype)
   softmax_b = tf.get_variable('softmax_b', [num_classes], dtype=dtype)
-  logits = tf.matmul(last, softmax_w) + softmax_b
+  logits = tf.matmul(state_final, softmax_w) + softmax_b
   posterior = tf.nn.softmax(logits)
-  #posterior = tf.Print(posterior, [posterior], summarize=32)
   # https://www.tensorflow.org/versions/r0.9/tutorials/mnist/pros/index.html
   cross_entropy = tf.reduce_mean(-tf.reduce_sum(target * tf.log(posterior), reduction_indices=[1]))
   cross_entropy_summary = tf.scalar_summary('train_cross_entropy_batch', cross_entropy)
 
   # Updates
-  opt = tf.train.RMSPropOptimizer(FLAGS.learning_rate)
+  opt = tf.train.AdamOptimizer(FLAGS.learning_rate)
   updates = opt.minimize(cross_entropy)
 
   # Evaluate
