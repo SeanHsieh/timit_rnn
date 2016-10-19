@@ -42,12 +42,11 @@ def prepare_batch(data, label_to_id, max_seq_len, start_from=None):
   batch_x_len = []
   batch_y = []
 
-  for _ in xrange(FLAGS.batch_size):
+  for i in xrange(FLAGS.batch_size):
     if start_from == None:
       idx = random.randint(0, len(data) - 1)
     else:
-      idx = start_from
-      start_from += 1
+      idx = start_from + i
     seq, target = data[idx]
     seq_len = len(seq)
     target_id = label_to_id[target]
